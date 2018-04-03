@@ -77,6 +77,7 @@ import io
 import os
 import fnmatch
 import subprocess
+import json
 import dateutil.parser
 
 try:
@@ -236,6 +237,17 @@ class TextCombiner(object):
     def dump(self, fd):
         if self.__text:
             fd.write(self.__header + self.__text)
+
+
+class JsonCombiner(object):
+    def __init__(self):
+        self.__elements = list()
+
+    def combine(self, text):
+        self.__elements.extend(json.loads(text))
+
+    def dump(self, fd):
+        fd.write(json.dumps(self.__elements))
 
 
 class XMLCombiner(object):
@@ -536,7 +548,7 @@ def retry(urlopen, url, data, timeout, count, wait, verbose):
             time.sleep(wait)
 
 
-def fetch(url, cred, authdata, postlines, xc, tc, dest, nets, chans,
+def fetch(url, cred, authdata, postlines, xc, tc, jc, dest, nets, chans,
           timeout, retry_count, retry_wait, finished, lock, verbose):
     try:
         url_handlers = []
@@ -841,6 +853,14 @@ def fetch(url, cred, authdata, postlines, xc, tc, dest, nets, chans,
                             with lock:
                                 tc.combine(text)
 
+                        elif content_type == "application/json":
+
+                            # this is the WFCatalog
+                            text = fd.read()
+
+                            with lock:
+                                jc.combine(text)
+
                         elif content_type == "application/xml":
                             fdread = fd.read
                             s = [0]
@@ -908,6 +928,7 @@ def route(url, cred, authdata, postdata, dest, chans_to_check, timeout,
     lock = threading.Lock()
     xc = XMLCombiner()
     tc = TextCombiner()
+    jc = JsonCombiner()
     nets = set()
     check = bool(chans_to_check)
     chans1 = chans_to_check
@@ -969,6 +990,7 @@ def route(url, cred, authdata, postdata, dest, chans_to_check, timeout,
                                                                   postlines,
                                                                   xc,
                                                                   tc,
+                                                                  jc,
                                                                   dest,
                                                                   nets,
                                                                   chans3,
@@ -1034,6 +1056,7 @@ def route(url, cred, authdata, postdata, dest, chans_to_check, timeout,
 
     xc.dump(dest)
     tc.dump(dest)
+    jc.dump(dest)
 
     if check:
         for p in url.post_params():

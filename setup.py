@@ -110,6 +110,7 @@ setup(
     # pip to create the appropriate form of executable for the target platform.
     entry_points='''
         [console_scripts]
+        availabilityplot=fdsnwsscripts.availabilityplot:main
         fdsnws_fetch=fdsnwsscripts.fdsnws_fetch:main
         fdsnws2sds=fdsnwsscripts.fdsnws2sds:main
         fdsnws2seed=fdsnwsscripts.fdsnws2seed:main
