@@ -62,6 +62,7 @@ specified on the command line.
 
 from __future__ import print_function
 import sys
+import io
 import matplotlib.pyplot as plt
 import urlparse
 import json
@@ -94,6 +95,10 @@ class Segments(list):
 
         return
 
+
+def stream2post(st):
+    aux = st.split('.')
+    return "%s %s %s %s" % (aux[0], aux[1], aux[2] if len(aux[2]) else '--', aux[3])
 
 def getsegments(wfc, streams=None):
 
@@ -300,7 +305,7 @@ def main():
     ax.xaxis_date()
     ax.set_yticks([])
 
-    dest = open(options.output_file, 'w')
+    respwfc = io.BytesIO()
 
     maxthreads = 1
 
@@ -309,17 +314,18 @@ def main():
     #       'start': options.starttime, 'end': options.endtime, 'csegments': 'true'}
     rurl = RoutingURL(urlparse.urlparse(options.url), qp)
 
-    route(rurl, None, None, postdata, dest, chans_to_check, options.timeout,
+    route(rurl, None, None, postdata, respwfc, chans_to_check, options.timeout,
           options.retries, options.retry_wait, maxthreads,
           options.verbose)
 
-    dest.close()
-    dest = open(options.output_file)
+    respwfc.seek(0)
 
-    strs = json.loads(dest.read())
+    strs = json.loads(respwfc.read())
 
     streams = getstreams(strs)
     segments = getsegments(strs, streams)
+
+    dest = open(options.output_file, 'w')
 
     labels = list()
     base = 0
@@ -330,6 +336,8 @@ def main():
             ax.hlines(base, i[0], i[1], 'b', linewidth=10)
             for seg in segments[stream]:
                 ax.hlines(base, seg[0], seg[1], 'g', linewidth=8, zorder=3)
+                # Save a line in the POST format (output)
+                dest.write(stream2post(stream) + ' ' + seg[0].isoformat() + 'Z ' + seg[1].isoformat() + 'Z\n')
                 allse.append(seg[0])
                 allse.append(seg[1])
 
@@ -340,6 +348,8 @@ def main():
                 ax.hlines(base, allse[i], allse[i+1], 'r', linewidth=8, zorder=3)
 
         base = base + 1
+
+    dest.close()
 
     ax.set_yticks(range(len(labels)))
     ax.set_yticklabels(labels, family="monospace", ha="right")
