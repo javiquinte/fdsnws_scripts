@@ -37,37 +37,70 @@ class Segments(list):
         return
 
 
-def getsegments(wfc):
+def getsegments(wfc, streams=None):
+
+    dictstreams = dict()
+    if streams is not None:
+        for s in streams.keys():
+            dictstreams[s] = list()
+
+    else:
+        for i in wfc:
+            s = "%s.%s.%s.%s" % (i["network"], i["station"], i["location"], i["channel"])
+            dictstreams[s] = list()
 
     requested1 = list()
     segs1 = list()
 
     for i in wfc:
+        s = "%s.%s.%s.%s" % (i["network"], i["station"], i["location"], i["channel"])
         reqseg = (datetime.datetime.strptime(i["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
                   datetime.datetime.strptime(i["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ"))
-        requested1.append(reqseg)
 
         if "c_segments" not in i:
-            segs1.append(reqseg)
+            dictstreams[s].append(reqseg)
             continue
 
         for cs in i["c_segments"]:
-            segs1.append((datetime.datetime.strptime(cs["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
-                          datetime.datetime.strptime(cs["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ")))
+            dictstreams[s].append((datetime.datetime.strptime(cs["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
+                                   datetime.datetime.strptime(cs["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ")))
 
-    # Merge requested
-    requested2 = Segments()
-    for r in requested1:
-        requested2.append(r)
+    for st in dictstreams:
+        # Merge segments
+        segs2 = Segments()
+        for s in dictstreams[st]:
+            segs2.append(s)
 
-    # Merge segments
-    segs2 = Segments()
-    for s in segs1:
-        segs2.append(s)
+        segs2.sort()
+        dictstreams[st] = segs2
+    return dictstreams
 
-    requested2.sort()
-    segs2.sort()
-    return requested2, segs2
+
+def getstreams(wfc):
+
+    streams = dict()
+    requested1 = list()
+    segs1 = list()
+
+    for i in wfc:
+        stream = "%s.%s.%s.%s" % (i["network"], i["station"], i["location"], i["channel"])
+
+        reqseg = (datetime.datetime.strptime(i["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
+                  datetime.datetime.strptime(i["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ"))
+
+        if stream not in streams.keys():
+            streams[stream] = list()
+        streams[stream].append(reqseg)
+
+    for stream in streams:
+        # Merge requested
+        segs = Segments()
+        for r in sorted(streams[stream]):
+            segs.append(r)
+
+        streams[stream] = segs
+
+    return streams
 
 
 def main():
@@ -79,7 +112,7 @@ def main():
     net = 'NL'
     sta = 'G700'
     loc = '*'
-    cha = 'HGZ'
+    cha = 'HG*'
     sttime = datetime.datetime(2017, 1, 1)
     endtime = datetime.datetime(2017, 1, 3)
     dest = io.BytesIO()
@@ -101,27 +134,31 @@ def main():
 
     strs = json.loads(dest.read())
 
-    print(strs)
-    requested, segs = getsegments(strs)
-    print(requested, segs)
-    for i in requested:
-        ax.axvspan(i[0], i[1],
-                   0, 0.6, fc="b", lw=0)
+    streams = getstreams(strs)
+    segments = getsegments(strs, streams)
 
-    for cs in segs:
-        ax.axvspan(cs[0], cs[1], 0.6, 1, facecolor="g", lw=0)
+    labels = list()
+    base = 0
+    for stream in streams:
+        labels.append(stream)
+        for i in streams[stream]:
+            allse = list()
+            ax.hlines(base, i[0], i[1], 'b', linewidth=10)
+            for seg in segments[stream]:
+                ax.hlines(base, seg[0], seg[1], 'g', linewidth=8, zorder=3)
+                allse.append(seg[0])
+                allse.append(seg[1])
 
-    allse = list()
-    for cs in segs:
-        allse.append(cs[0])
-        allse.append(cs[1])
+            for i in range(1, len(allse)-1, 2):
+                if allse[i] > allse[i+1]:
+                    continue
+                print("Gap:", allse[i], allse[i+1])
+                ax.hlines(base, allse[i], allse[i+1], 'r', linewidth=8, zorder=3)
 
-    for i in range(1, len(allse)-1, 2):
-        if allse[i] > allse[i+1]:
-            continue
-        print("Gap:", allse[i], allse[i+1])
-        ax.axvspan(allse[i], allse[i+1], 0.6, 1, facecolor="r", lw=0)
+        base = base + 1
 
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels, family="monospace", ha="right")
     ax.autoscale_view()
     fig.autofmt_xdate()
     plt.draw()
