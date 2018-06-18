@@ -139,31 +139,42 @@ def getsegments(wfc, streams=None):
     return dictstreams
 
 
-def getstreams(wfc):
-
+def getstreams(wfc, maxsize=None):
+    maxsize = maxsize * 1024 * 1024
     streams = dict()
-    requested1 = list()
-    segs1 = list()
+    result = [dict()]
 
     for i in wfc:
         stream = "%s.%s.%s.%s" % (i["network"], i["station"], i["location"], i["channel"])
 
         reqseg = (datetime.datetime.strptime(i["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
-                  datetime.datetime.strptime(i["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ"))
+                  datetime.datetime.strptime(i["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
+                  i["num_records"] * max(i["record_length"]))
 
         if stream not in streams.keys():
             streams[stream] = list()
+
         streams[stream].append(reqseg)
+        print(stream, i["num_records"] * max(i["record_length"]))
+
+    reqsize = 0
 
     for stream in streams:
         # Merge requested
         segs = Segments()
         for r in sorted(streams[stream]):
-            segs.append(r)
+            if reqsize + r[2] > maxsize:
+                result[-1][stream] = segs
+                result.append(dict())
+                reqsize = 0
+                segs = Segments()
 
-        streams[stream] = segs
+            segs.append(r[:2])
+            reqsize = reqsize + r[2]
 
-    return streams
+        result[-1][stream] = segs
+
+    return result
 
 
 def main():
@@ -192,8 +203,9 @@ def main():
             url="http://geofon.gfz-potsdam.de/eidaws/routing/1/",
             timeout=30,
             retries=0,
-            retry_wait=5,
-            output_file="output.txt")
+            retry_wait=0,
+            max=1000,
+            output_file="output")
 
     parser.add_option("-h", "--help", action="store_true", default=False,
                       help="show help message and exit")
@@ -231,15 +243,18 @@ def main():
                       callback=add_qp,
                       help="end time")
 
+    parser.add_option("-m", "--max", type="int",
+                      help="Maximum size (in MB) for each request (default %default)")
+
     parser.add_option("-t", "--timeout", type="int",
                       help="request timeout in seconds (default %default)")
 
-    parser.add_option("-r", "--retries", type="int",
-                      help="number of retries (default %default)")
+    # parser.add_option("-r", "--retries", type="int",
+    #                   help="number of retries (default %default)")
 
-    parser.add_option("-w", "--retry-wait", type="int",
-                      help="seconds to wait before each retry "
-                           "(default %default)")
+    # parser.add_option("-w", "--retry-wait", type="int",
+    #                   help="seconds to wait before each retry "
+    #                        "(default %default)")
 
     parser.add_option("-c", "--credentials-file", type="string",
                       help="URL,user,password file (CSV format) for queryauth")
@@ -251,7 +266,7 @@ def main():
                       help="request file in FDSNWS POST format")
 
     parser.add_option("-o", "--output-file", type="string",
-                      help="file where downloaded data is written")
+                      help="filename (no extension) where streams to download and availability plot must be saved")
 
     (options, args) = parser.parse_args()
 
@@ -314,40 +329,48 @@ def main():
     #       'start': options.starttime, 'end': options.endtime, 'csegments': 'true'}
     rurl = RoutingURL(urlparse.urlparse(options.url), qp)
 
-    route(rurl, None, None, postdata, respwfc, chans_to_check, options.timeout,
-          options.retries, options.retry_wait, maxthreads,
-          options.verbose)
+    try:
+        route(rurl, None, None, postdata, respwfc, chans_to_check, options.timeout,
+              options.retries, options.retry_wait, maxthreads,
+              options.verbose)
+
+    except:
+        print('Exception')
 
     respwfc.seek(0)
 
     strs = json.loads(respwfc.read())
+    print(strs)
 
-    streams = getstreams(strs)
-    segments = getsegments(strs, streams)
+    results = getstreams(strs, options.max)
+    print(results)
 
-    dest = open(options.output_file, 'w')
+    for streams in results:
+        segments = getsegments(strs, streams)
 
-    labels = list()
-    base = 0
-    for stream in streams:
-        labels.append(stream)
-        for i in streams[stream]:
-            allse = list()
-            ax.hlines(base, i[0], i[1], 'b', linewidth=10)
-            for seg in segments[stream]:
-                ax.hlines(base, seg[0], seg[1], 'g', linewidth=8, zorder=3)
-                # Save a line in the POST format (output)
-                dest.write(stream2post(stream) + ' ' + seg[0].isoformat() + 'Z ' + seg[1].isoformat() + 'Z\n')
-                allse.append(seg[0])
-                allse.append(seg[1])
+        dest = open(options.output_file + '.txt', 'w')
 
-            for i in range(1, len(allse)-1, 2):
-                if allse[i] > allse[i+1]:
-                    continue
-                print("Gap:", allse[i], allse[i+1])
-                ax.hlines(base, allse[i], allse[i+1], 'r', linewidth=8, zorder=3)
+        labels = list()
+        base = 0
+        for stream in streams:
+            labels.append(stream)
+            for i in streams[stream]:
+                allse = list()
+                ax.hlines(base, i[0], i[1], 'b', linewidth=10)
+                for seg in segments[stream]:
+                    ax.hlines(base, seg[0], seg[1], 'g', linewidth=8, zorder=3)
+                    # Save a line in the POST format (output)
+                    dest.write(stream2post(stream) + ' ' + seg[0].isoformat() + 'Z ' + seg[1].isoformat() + 'Z\n')
+                    allse.append(seg[0])
+                    allse.append(seg[1])
 
-        base = base + 1
+                for i in range(1, len(allse)-1, 2):
+                    if allse[i] > allse[i+1]:
+                        continue
+                    print("Gap:", allse[i], allse[i+1])
+                    ax.hlines(base, allse[i], allse[i+1], 'r', linewidth=8, zorder=3)
+
+            base = base + 1
 
     dest.close()
 
@@ -356,7 +379,7 @@ def main():
     ax.autoscale_view()
     fig.autofmt_xdate()
     plt.draw()
-    plt.show()
+    plt.savefig(options.output_file + '.png')
 
 
 if __name__ == "__main__":
