@@ -77,6 +77,8 @@ VERSION = "2018.090"
 
 class Segments(list):
     def append(self, it):
+        # Accept a starttime and endtime and merge it with existing segments if available.
+        # If there are no other segments next to it, append it normally to the list.
         if (len(it) != 2) or (type(it) != tuple):
             raise TypeError('A tuple with 2 components was expected!')
 
@@ -96,83 +98,61 @@ class Segments(list):
         return
 
 
-def stream2post(st):
-    aux = st.split('.')
-    return "%s %s %s %s" % (aux[0], aux[1], aux[2] if len(aux[2]) else '--', aux[3])
+def getstreams(wfc, maxsize=None):
+    maxsize = maxsize * 1024 * 1024
+    # streams = dict()
+    result = [dict()]
 
-def getsegments(wfc, streams=None):
+    reqlines = list()
+    result = list()
+    reqsize = 0
+    package = 0
+    emptypackage = True
 
-    dictstreams = dict()
-    if streams is not None:
-        for s in streams.keys():
-            dictstreams[s] = list()
+    # wfc.sort(key=lambda i: '%s.%s.%s.%s' % (i["network"], i["station"], i["location"], i["channel"]))
 
-    else:
-        for i in wfc:
-            s = "%s.%s.%s.%s" % (i["network"], i["station"], i["location"], i["channel"])
-            dictstreams[s] = list()
-
-    requested1 = list()
-    segs1 = list()
-
+    # We expect that wfc is sorted by stream code!
     for i in wfc:
-        s = "%s.%s.%s.%s" % (i["network"], i["station"], i["location"], i["channel"])
-        reqseg = (datetime.datetime.strptime(i["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
-                  datetime.datetime.strptime(i["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ"))
+        if not(emptypackage) and (reqsize + i["num_records"] * max(i["record_length"]) > maxsize):
+            reqsize = 0
+            emptypackage = True
+            package = package + 1
+
+        emptypackage = False
+        reqsize = reqsize + i["num_records"] * max(i["record_length"])
 
         if "c_segments" not in i:
-            dictstreams[s].append(reqseg)
+            reqlines.append((i["network"], i["station"], i["location"], i["channel"],
+                             datetime.datetime.strptime(i["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
+                             datetime.datetime.strptime(i["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
+                             package))
             continue
 
         for cs in i["c_segments"]:
-            dictstreams[s].append((datetime.datetime.strptime(cs["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
-                                   datetime.datetime.strptime(cs["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ")))
+            reqlines.append((i["network"], i["station"], i["location"], i["channel"],
+                             datetime.datetime.strptime(cs["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
+                             datetime.datetime.strptime(cs["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
+                             package))
 
-    for st in dictstreams:
-        # Merge segments
-        segs2 = Segments()
-        for s in dictstreams[st]:
-            segs2.append(s)
+    stream = None
+    segs = Segments()
+    package = None
 
-        segs2.sort()
-        dictstreams[st] = segs2
-    return dictstreams
+    for i in reqlines:
+        if stream != i[:4]:
+            if len(segs):
+                for s in segs:
+                    result.append((stream[0], stream[1], stream[2], stream[3], s[0], s[1], package))
+            stream = i[:4]
+            package = i[-1]
+            segs = Segments()
 
+        segs.append((i[4], i[5]))
 
-def getstreams(wfc, maxsize=None):
-    maxsize = maxsize * 1024 * 1024
-    streams = dict()
-    result = [dict()]
-
-    for i in wfc:
-        stream = "%s.%s.%s.%s" % (i["network"], i["station"], i["location"], i["channel"])
-
-        reqseg = (datetime.datetime.strptime(i["start_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
-                  datetime.datetime.strptime(i["end_time"], "%Y-%m-%dT%H:%M:%S.%fZ"),
-                  i["num_records"] * max(i["record_length"]))
-
-        if stream not in streams.keys():
-            streams[stream] = list()
-
-        streams[stream].append(reqseg)
-        print(stream, i["num_records"] * max(i["record_length"]))
-
-    reqsize = 0
-
-    for stream in streams:
-        # Merge requested
-        segs = Segments()
-        for r in sorted(streams[stream]):
-            if reqsize + r[2] > maxsize:
-                result[-1][stream] = segs
-                result.append(dict())
-                reqsize = 0
-                segs = Segments()
-
-            segs.append(r[:2])
-            reqsize = reqsize + r[2]
-
-        result[-1][stream] = segs
+    # Flush last stream
+    if len(segs):
+        for s in segs:
+            result.append((stream[0], stream[1], stream[2], stream[3], s[0], s[1], package))
 
     return result
 
@@ -315,11 +295,6 @@ def main():
                         if l == '--': l = ''
                         chans_to_check.add('.'.join((n, s, l, c)))
 
-    fig, ax = plt.subplots()
-    ax.clear()
-    ax.xaxis_date()
-    ax.set_yticks([])
-
     respwfc = io.BytesIO()
 
     maxthreads = 1
@@ -340,39 +315,50 @@ def main():
     respwfc.seek(0)
 
     strs = json.loads(respwfc.read())
-    print(strs)
+    # print(strs)
+
+    strs.sort(key=lambda i: '%s.%s.%s.%s' % (i["network"], i["station"], i["location"], i["channel"]))
 
     results = getstreams(strs, options.max)
-    print(results)
 
-    for streams in results:
-        segments = getsegments(strs, streams)
+    part = -1
+    for i in results:
+        # print(i)
+        if part != i[-1]:
+            try:
+                dest.close()
+            except Exception:
+                pass
+            part = i[-1]
+            dest = open('%s-%02d.txt' % (options.output_file, i[-1]), 'w')
 
-        dest = open(options.output_file + '.txt', 'w')
+        dest.write('%s %s %s %s %s %s\n' % (i[0], i[1], i[2], i[3], i[4].isoformat(), i[5].isoformat()))
 
-        labels = list()
-        base = 0
-        for stream in streams:
-            labels.append(stream)
-            for i in streams[stream]:
-                allse = list()
-                ax.hlines(base, i[0], i[1], 'b', linewidth=10)
-                for seg in segments[stream]:
-                    ax.hlines(base, seg[0], seg[1], 'g', linewidth=8, zorder=3)
-                    # Save a line in the POST format (output)
-                    dest.write(stream2post(stream) + ' ' + seg[0].isoformat() + 'Z ' + seg[1].isoformat() + 'Z\n')
-                    allse.append(seg[0])
-                    allse.append(seg[1])
+    # Availability plot generation
+    fig, ax = plt.subplots()
+    ax.clear()
+    ax.xaxis_date()
+    ax.set_yticks([])
 
-                for i in range(1, len(allse)-1, 2):
-                    if allse[i] > allse[i+1]:
-                        continue
-                    print("Gap:", allse[i], allse[i+1])
-                    ax.hlines(base, allse[i], allse[i+1], 'r', linewidth=8, zorder=3)
+    labels = list()
+    base = -1
+    pendingsegment = None
 
+    for i in results:
+        # print(i)
+        stream = '%s.%s.%s.%s' % tuple(i[0:4])
+
+        if not len(labels) or (stream != labels[-1]):
             base = base + 1
+            labels.append(stream)
+            pendingsegment = None
 
-    dest.close()
+        if pendingsegment:
+            # print("Gap:", pendingsegment, i[4])
+            ax.hlines(base, pendingsegment, i[4], 'r', linewidth=8, zorder=3)
+
+        ax.hlines(base, i[4], i[5], 'g', linewidth=6, zorder=2)
+        pendingsegment = i[5]
 
     ax.set_yticks(range(len(labels)))
     ax.set_yticklabels(labels, family="monospace", ha="right")
