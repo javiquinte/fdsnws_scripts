@@ -13,51 +13,17 @@ A command-line FDSN Web Service client using EIDA routing and authentication.
 Usage Examples
 ==============
 
-Request 60 minutes of the ``"LHZ"`` channel of EIDA stations starting with
-``"A"`` for a seismic event around 2010-02-27 07:00 (UTC). Optionally add
-``"-v"`` for verbosity. Resulting Mini-SEED data will be written to file
-``"data.mseed"``.
+Check the availability of 60 minutes of the ``"LHZ"`` channel of EIDA stations
+starting with ``"A"`` for a seismic event around 2010-02-27 07:00 (UTC). Optionally
+add ``"-v"`` for verbosity. A graphic showing the availability will be written to
+file ``"data.png"``, while a text file to request the (meta)data will be written
+to file ``"data-00.txt"``.
 
 .. code-block:: bash
 
     $ %(prog)s -N '*' -S 'A*' -L '*' -C 'LHZ' \
--s "2010-02-27T07:00:00Z" -e "2010-02-27T08:00:00Z" -v -o data.mseed
+-s "2010-02-27T07:00:00Z" -e "2010-02-27T08:00:00Z" -v -o data
 
-The above request is anonymous and therefore restricted data will not be
-included. To include restricted data, use a file containing a token obtained
-from an EIDA authentication service and/or a CSV file with username and
-password for each node not implementing the EIDA auth extension.
-
-.. code-block:: bash
-
-    $ %(prog)s -a token.asc -c credentials.csv -N '*' -S 'A*' -L '*' -C 'LHZ' \
--s "2010-02-27T07:00:00Z" -e "2010-02-27T08:00:00Z" -v -o data.mseed
-
-StationXML metadata for the above request can be requested using the following
-command:
-
-.. code-block:: bash
-
-    $ %(prog)s -N '*' -S 'A*' -L '*' -C 'LHZ' \
--s "2010-02-27T07:00:00Z" -e "2010-02-27T08:00:00Z" -y station \
--q level=response -v -o station.xml
-
-Multiple query parameters can be used:
-
-.. code-block:: bash
-
-    $ %(prog)s -N '*' -S '*' -L '*' -C '*' \
--s "2010-02-27T07:00:00Z" -e "2010-02-27T08:00:00Z" -y station \
--q format=text -q level=channel -q latitude=20 -q longitude=-150 \
--q maxradius=15 -v -o station.txt
-
-Bulk requests can be made in ArcLink (-f), breq_fast (-b) or native FDSNWS POST
-(-p) format. Query parameters should not be included in the request file, but
-specified on the command line.
-
-.. code-block:: bash
-
-    $ %(prog)s -p request.txt -y station -q level=channel -v -o station.xml
 """
 
 from __future__ import print_function
@@ -72,7 +38,7 @@ from fdsnwsscripts.fdsnws_fetch import route
 from fdsnwsscripts.fdsnws_fetch import RoutingURL
 
 
-VERSION = "2018.090"
+VERSION = "2018.171"
 
 
 class Segments(list):
