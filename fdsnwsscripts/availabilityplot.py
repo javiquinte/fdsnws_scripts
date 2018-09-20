@@ -48,18 +48,35 @@ class Segments(list):
         if (len(it) != 2) or (type(it) != tuple):
             raise TypeError('A tuple with 2 components was expected!')
 
+        # print(self, it)
         for ind in range(len(self) - 1, -1, -1):
             if self[ind][0] <= it[0] <= self[ind][1]:
                 it = (self[ind][0], it[1])
                 del self[ind]
+                super(Segments, self).insert(ind, it)
+                return
             elif self[ind][0] <= it[1] <= self[ind][1]:
                 it = (it[0], self[ind][1])
                 del self[ind]
+                super(Segments, self).insert(ind, it)
+                return
             elif (it[0] <= self[ind][0]) and (self[ind][1] <= it[1]):
                 del self[ind]
+                super(Segments, self).insert(ind, it)
+                return
             elif (self[ind][0] <= it[0]) and (it[1] <= self[ind][1]):
-                continue
-        super(Segments, self).append(it)
+                return
+
+        for ind in range(len(self)):
+            if self[ind][0] <= it[0]:
+                super(Segments, self).insert(ind, it)
+                return
+        else:
+            super(Segments, self).insert(0, it)
+
+        if not len(self):
+            super(Segments, self).append(it)
+        # print(self)
 
         return
 
@@ -150,7 +167,7 @@ def main():
             timeout=30,
             retries=0,
             retry_wait=0,
-            max=1000,
+            max=10000,
             output_file="output")
 
     parser.add_option("-h", "--help", action="store_true", default=False,
@@ -229,6 +246,12 @@ def main():
     if args or not options.output_file:
         parser.print_usage(sys.stderr)
         return 1
+
+    if qp.get('network', '*') == '*':
+        print("Missing network parameter! This will be cancelled to avoid the request of a big amount of unwanted data.")
+        print(__doc__.split("Usage Examples", 1)[0], end="")
+        parser.print_help()
+        return 2
 
     chans_to_check = set()
     postdata = None
